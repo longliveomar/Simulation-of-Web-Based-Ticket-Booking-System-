@@ -21,6 +21,7 @@ MAX_QUEUE_SIZE = 100  # Max queue before dropping requests
 response_times = {}
 utilization_rates = {}
 dropped_requests = {}
+waiting_times = {}  # NEW: Track waiting times
 
 # Request Handling Process
 def handle_request(env, server, request_id, server_count):
@@ -28,16 +29,19 @@ def handle_request(env, server, request_id, server_count):
 
     with server.request() as req:
         yield req  
-        
+
+        wait_time = env.now - arrival_time  # NEW: Time spent waiting in queue
+
         # Check if the request has waited too long (dropped if waited >1s)
-        if env.now - arrival_time > 1:
+        if wait_time > 1:
             dropped_requests[server_count] += 1
             return  
 
-        yield env.timeout(PROCESSING_TIME)  
+        yield env.timeout(PROCESSING_TIME)
 
     response_time = env.now - arrival_time  
     response_times[server_count].append(response_time)
+    waiting_times[server_count].append(wait_time)  # NEW: Save waiting time
 
 # User Request Generator
 def user_request_generator(env, server, server_count):
@@ -57,6 +61,7 @@ def user_request_generator(env, server, server_count):
 def run_simulation(num_servers):
     response_times[num_servers] = []
     dropped_requests[num_servers] = 0  
+    waiting_times[num_servers] = []  # NEW
 
     env = simpy.Environment()
     server = simpy.Resource(env, capacity=num_servers)  
@@ -65,22 +70,23 @@ def run_simulation(num_servers):
     env.run(until=SIMULATION_TIME)  
 
     avg_response_time = statistics.mean(response_times[num_servers]) if response_times[num_servers] else float('inf')
+    avg_waiting_time = statistics.mean(waiting_times[num_servers]) if waiting_times[num_servers] else float('inf')  # NEW
     server_utilization = (sum(response_times[num_servers]) / (num_servers * SIMULATION_TIME)) * 100
 
     utilization_rates[num_servers] = server_utilization
 
-    return avg_response_time, server_utilization, dropped_requests[num_servers]
+    return avg_response_time, server_utilization, dropped_requests[num_servers], avg_waiting_time  # NEW
 
 # User Input for Server Count
 num_servers = int(input("Enter the number of servers to simulate: "))
 
 # Run Simulation for User-Entered Value
-avg_time, utilization, dropped = run_simulation(num_servers)
+avg_time, utilization, dropped, avg_wait = run_simulation(num_servers)  # UPDATED
 
 # Print results in a table
-results_table = [[num_servers, f"{avg_time:.3f} sec", f"{utilization:.2f}%", dropped]]
+results_table = [[num_servers, f"{avg_time:.3f} sec", f"{avg_wait:.3f} sec", f"{utilization:.2f}%", dropped]]  # UPDATED
 print("\n📊 Simulation Results:")
-print(tabulate(results_table, headers=["# Servers", "Avg Response Time", "Server Utilization", "Dropped Requests"], tablefmt="pretty"))
+print(tabulate(results_table, headers=["# Servers", "Avg Response Time", "Avg Waiting Time", "Server Utilization", "Dropped Requests"], tablefmt="pretty"))
 
 # Explanation 
 print("\n🔎 Key Observations:")
@@ -89,6 +95,7 @@ if avg_time > 0.5:
 else:
     print(f"✅ With {num_servers} servers, response time is {avg_time:.3f} sec, meeting the 500ms target!")
 
+print(f"🔹 Average waiting time: {avg_wait:.3f} sec")  # NEW
 print(f"🔹 Server utilization: {utilization:.2f}%")
 print(f"🔹 Dropped requests: {dropped} (Requests that waited too long or exceeded the queue limit)")
 
@@ -124,7 +131,7 @@ print("   - Auto-scaling can dynamically adjust server count for optimal perform
 
 # Plot Results
 fig, ax = plt.subplots(figsize=(6, 4))
-ax.bar(["Avg Response Time", "Utilization", "Dropped Requests"], [avg_time, utilization, dropped], color=['blue', 'green', 'red'])
+ax.bar(["Avg Resp Time", "Avg Wait Time", "Utilization", "Dropped"], [avg_time, avg_wait, utilization, dropped], color=['blue', 'orange', 'green', 'red'])  # UPDATED
 ax.set_title("Performance Metrics")
 ax.set_ylabel("Values")
 plt.show()
